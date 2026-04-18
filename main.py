@@ -143,10 +143,10 @@ def celebrate_bone():
     global state, bone_count
     state = 2
     bone_count += 1
-
+    log_data()
     # Victory sound (plays in background while dog moves)
     music.play(
-        music.builtin_playable_sound_effect(soundExpression.happy),
+        music.builtin_playable_sound_effect(soundExpression.hello),
         music.PlaybackMode.IN_BACKGROUND
     )
     basic.show_icon(IconNames.YES)
@@ -157,12 +157,6 @@ def celebrate_bone():
     basic.pause(600)
 
     # Victory dance sequence
-    xgo.execution_action(xgo.action_enum.TWIRL_ROLL)
-    basic.pause(1400)
-    xgo.execution_action(xgo.action_enum.SUR_PLACE)
-    basic.pause(1400)
-    xgo.execution_action(xgo.action_enum.TRIAXIAL_ROTATION)
-    basic.pause(1400)
     xgo.execution_action(xgo.action_enum.STRETCH_ONESELF)
     basic.pause(800)
     xgo.execution_action(xgo.action_enum.STAND)
@@ -244,6 +238,11 @@ input.on_button_pressed(Button.A, on_button_a)
 # Button B — stop and sit
 def on_button_b():
     stop_searching()
+    # Display total bone count on LED matrix
+    basic.show_number(bone_count)
+    basic.pause(1200)
+    basic.clear_screen()
+    
 input.on_button_pressed(Button.B, on_button_b)
 
 
@@ -295,6 +294,29 @@ def on_radio_number(cmd: number):
         basic.pause(1000)
 radio.on_received_number(on_radio_number)
 
+def log_data():
+        global mag_x, mag_y, mag_z, mag_strength
+        global sonar_cm, last_log_time
+        # ── 5. Periodic sensor data broadcast ───────────────────
+        now = input.running_time()
+        if now - last_log_time > LOG_INTERVAL_MS:
+            last_log_time = now
+            buf = bytearray(16)
+            buf.set_number(NumberFormat.INT16_LE, 0, mag_x)
+            buf.set_number(NumberFormat.INT16_LE, 2, mag_y)
+            buf.set_number(NumberFormat.INT16_LE, 4, mag_z)
+            buf.set_number(NumberFormat.INT16_LE, 6,
+                               input.acceleration(Dimension.X))
+            buf.set_number(NumberFormat.INT16_LE, 8,
+                               input.acceleration(Dimension.Y))
+            buf.set_number(NumberFormat.INT16_LE, 10,
+                               input.acceleration(Dimension.Z))
+            buf.set_number(NumberFormat.INT16_LE, 12, sonar_cm)
+            buf.set_number(NumberFormat.INT16_LE, 14, state)
+            radio.send_buffer(buf)
+
+
+loops.every_interval(500, log_data)
 
 # ────────────────────────────────────────────────────────────
 # MAIN FOREVER LOOP
@@ -324,24 +346,6 @@ def on_forever():
     # ── 4. Normal search behaviour ──────────────────────────
     elif state == 1:
         do_search_step()
-
-    # ── 5. Periodic sensor data broadcast ───────────────────
-    now = input.running_time()
-    if now - last_log_time > LOG_INTERVAL_MS:
-        last_log_time = now
-        buf = bytearray(16)
-        buf.set_number(NumberFormat.INT16_LE, 0, mag_x)
-        buf.set_number(NumberFormat.INT16_LE, 2, mag_y)
-        buf.set_number(NumberFormat.INT16_LE, 4, mag_z)
-        buf.set_number(NumberFormat.INT16_LE, 6,
-                       input.acceleration(Dimension.X))
-        buf.set_number(NumberFormat.INT16_LE, 8,
-                       input.acceleration(Dimension.Y))
-        buf.set_number(NumberFormat.INT16_LE, 10,
-                       input.acceleration(Dimension.Z))
-        buf.set_number(NumberFormat.INT16_LE, 12, sonar_cm)
-        buf.set_number(NumberFormat.INT16_LE, 14, state)
-        radio.send_buffer(buf)
 
     basic.pause(100)
 

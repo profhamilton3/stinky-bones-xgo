@@ -136,20 +136,15 @@ function celebrate_bone() {
     
     state = 2
     bone_count += 1
+    log_data()
     //  Victory sound (plays in background while dog moves)
-    music.play(music.builtinPlayableSoundEffect(soundExpression.happy), music.PlaybackMode.InBackground)
+    music.play(music.builtinPlayableSoundEffect(soundExpression.hello), music.PlaybackMode.InBackground)
     basic.showIcon(IconNames.Yes)
     basic.pause(300)
     //  Sit first to signal "found something"
     xgo.execution_action(xgo.action_enum.Sit_down)
     basic.pause(600)
     //  Victory dance sequence
-    xgo.execution_action(xgo.action_enum.Twirl_Roll)
-    basic.pause(1400)
-    xgo.execution_action(xgo.action_enum.Sur_place)
-    basic.pause(1400)
-    xgo.execution_action(xgo.action_enum.Triaxial_rotation)
-    basic.pause(1400)
     xgo.execution_action(xgo.action_enum.Stretch_oneself)
     basic.pause(800)
     xgo.execution_action(xgo.action_enum.Stand)
@@ -229,6 +224,10 @@ input.onButtonPressed(Button.A, function on_button_a() {
 //  Button B — stop and sit
 input.onButtonPressed(Button.B, function on_button_b() {
     stop_searching()
+    //  Display total bone count on LED matrix
+    basic.showNumber(bone_count)
+    basic.pause(1200)
+    basic.clearScreen()
 })
 //  Double-clap — toggle search on / off
 //  Two loud sounds within CLAP_WINDOW_MS count as a double-clap
@@ -281,11 +280,33 @@ radio.onReceivedNumber(function on_radio_number(cmd: number) {
     }
     
 })
+function log_data() {
+    let buf: Buffer;
+    
+    
+    //  ── 5. Periodic sensor data broadcast ───────────────────
+    let now = input.runningTime()
+    if (now - last_log_time > LOG_INTERVAL_MS) {
+        last_log_time = now
+        buf = control.createBuffer(16)
+        buf.setNumber(NumberFormat.Int16LE, 0, mag_x)
+        buf.setNumber(NumberFormat.Int16LE, 2, mag_y)
+        buf.setNumber(NumberFormat.Int16LE, 4, mag_z)
+        buf.setNumber(NumberFormat.Int16LE, 6, input.acceleration(Dimension.X))
+        buf.setNumber(NumberFormat.Int16LE, 8, input.acceleration(Dimension.Y))
+        buf.setNumber(NumberFormat.Int16LE, 10, input.acceleration(Dimension.Z))
+        buf.setNumber(NumberFormat.Int16LE, 12, sonar_cm)
+        buf.setNumber(NumberFormat.Int16LE, 14, state)
+        radio.sendBuffer(buf)
+    }
+    
+}
+
+loops.everyInterval(500, log_data)
 //  ────────────────────────────────────────────────────────────
 //  MAIN FOREVER LOOP
 //  ────────────────────────────────────────────────────────────
 basic.forever(function on_forever() {
-    let buf: Buffer;
     
     
     //  ── 1. Read all sensors ─────────────────────────────────
@@ -305,22 +326,6 @@ basic.forever(function on_forever() {
     } else if (state == 1) {
         //  ── 4. Normal search behaviour ──────────────────────────
         do_search_step()
-    }
-    
-    //  ── 5. Periodic sensor data broadcast ───────────────────
-    let now = input.runningTime()
-    if (now - last_log_time > LOG_INTERVAL_MS) {
-        last_log_time = now
-        buf = control.createBuffer(16)
-        buf.setNumber(NumberFormat.Int16LE, 0, mag_x)
-        buf.setNumber(NumberFormat.Int16LE, 2, mag_y)
-        buf.setNumber(NumberFormat.Int16LE, 4, mag_z)
-        buf.setNumber(NumberFormat.Int16LE, 6, input.acceleration(Dimension.X))
-        buf.setNumber(NumberFormat.Int16LE, 8, input.acceleration(Dimension.Y))
-        buf.setNumber(NumberFormat.Int16LE, 10, input.acceleration(Dimension.Z))
-        buf.setNumber(NumberFormat.Int16LE, 12, sonar_cm)
-        buf.setNumber(NumberFormat.Int16LE, 14, state)
-        radio.sendBuffer(buf)
     }
     
     basic.pause(100)
