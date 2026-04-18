@@ -75,8 +75,8 @@ For continuous movement (walking, turning) use `xgo.move_xgo()`:
 # Parameters: direction, speed (0-100)
 xgo.move_xgo(xgo.direction_enum.FORWARD, 50)    # walk forward at 50%
 xgo.move_xgo(xgo.direction_enum.BACKWARD, 40)   # walk backward at 40%
-xgo.move_xgo(xgo.direction_enum.TURN_LEFT, 50)  # turn left at 50%
-xgo.move_xgo(xgo.direction_enum.TURN_RIGHT, 50) # turn right at 50%
+xgo.move_xgo(xgo.direction_enum.LEFT, 50)       # turn left at 50%
+xgo.move_xgo(xgo.direction_enum.RIGHT, 50)      # turn right at 50%
 ```
 
 After sending a move command, use `basic.pause(ms)` to let the dog travel

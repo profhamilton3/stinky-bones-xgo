@@ -272,8 +272,8 @@ def on_radio_number(cmd: number):
     elif cmd == 3: xgo.execution_action(xgo.action_enum.STAND)
     elif cmd == 4: celebrate_bone()
     elif cmd == 5: xgo.move_xgo(xgo.direction_enum.FORWARD, 50); basic.pause(1000)
-    elif cmd == 6: xgo.move_xgo(xgo.direction_enum.TURN_LEFT, 50); basic.pause(700)
-    elif cmd == 7: xgo.move_xgo(xgo.direction_enum.TURN_RIGHT, 50); basic.pause(700)
+    elif cmd == 6: xgo.move_xgo(xgo.direction_enum.LEFT, 50); basic.pause(700)
+    elif cmd == 7: xgo.move_xgo(xgo.direction_enum.RIGHT, 50); basic.pause(700)
     elif cmd == 8: xgo.move_xgo(xgo.direction_enum.BACKWARD, 50); basic.pause(1000)
 radio.on_received_number(on_radio_number)
 ```

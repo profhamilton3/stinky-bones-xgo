@@ -7,7 +7,7 @@
 
 - Explain how ultrasonic sonar measures distance
 - Wire the HC-SR04 to the RingBit P0 connector post
-- Call `sonar.ping()` and interpret its return value
+- Call `sonarbit.sonarbit_distance()` and interpret its return value
 - Implement wall-avoidance behaviour with backup and turn
 - Describe a strategy for mapping arena boundaries without sonar
 
@@ -72,13 +72,14 @@ timing automatically.
 
 ```python
 # Returns distance in centimetres (0 if no echo / out of range)
-distance = sonar.ping(DigitalPin.P0, PingUnit.CENTIMETERS)
+distance = sonarbit.sonarbit_distance(Distance_Unit.Distance_Unit_cm, DigitalPin.P0)
 
-# Or in inches
-distance = sonar.ping(DigitalPin.P0, PingUnit.INCHES)
+# Or in millimetres / inches
+distance = sonarbit.sonarbit_distance(Distance_Unit.Distance_Unit_mm, DigitalPin.P0)
+distance = sonarbit.sonarbit_distance(Distance_Unit.Distance_Unit_inch, DigitalPin.P0)
 ```
 
-**Important:** `sonar.ping()` returns `0` when no echo is received within
+**Important:** `sonarbit_distance()` returns `0` when no echo is received within
 the timeout period. Always check `sonar_cm > 0` before acting on the reading:
 
 ```python
@@ -109,7 +110,7 @@ def avoid_wall():
     xgo.move_xgo(xgo.direction_enum.BACKWARD, 40)
     basic.pause(900)
 
-    xgo.move_xgo(xgo.direction_enum.TURN_RIGHT, 40)
+    xgo.move_xgo(xgo.direction_enum.RIGHT, 40)
     basic.pause(700)
 
     xgo.execution_action(xgo.action_enum.STAND)
@@ -160,7 +161,7 @@ The simplest strategy: turn a random amount after every N steps.
 import random
 # After each sniff cycle, turn a random amount
 angle = random.randint(20, 90)
-xgo.move_xgo(xgo.direction_enum.TURN_RIGHT, 50)
+xgo.move_xgo(xgo.direction_enum.RIGHT, 50)
 basic.pause(angle * 10)   # rough estimate: 10ms per degree
 ```
 
@@ -185,7 +186,7 @@ an averaging filter:
 
 ```python
 # Take 3 readings and use the average to reduce false positives
-readings = [sonar.ping(DigitalPin.P0, PingUnit.CENTIMETERS) for _ in range(3)]
+readings = [sonarbit.sonarbit_distance(Distance_Unit.Distance_Unit_cm, DigitalPin.P0) for _ in range(3)]
 valid = [r for r in readings if r > 0]
 sonar_cm = sum(valid) // len(valid) if valid else 0
 ```
@@ -199,7 +200,7 @@ Flash this test program and map how the sensor responds to objects:
 
 ```python
 def on_forever():
-    d = sonar.ping(DigitalPin.P0, PingUnit.CENTIMETERS)
+    d = sonarbit.sonarbit_distance(Distance_Unit.Distance_Unit_cm, DigitalPin.P0)
     print("distance:", d, "cm")
     basic.pause(200)
 basic.forever(on_forever)
@@ -225,7 +226,7 @@ happened in a 3-minute run? Where in the arena did most of them occur?
    directly to the side? How could you add side-sensing?
 2. The speed of sound changes with temperature (faster when warmer).
    Does this matter at room temperature for a 15 cm threshold? Calculate.
-3. Why does `sonar.ping()` return 0 instead of a very large number when
+3. Why does `sonarbit_distance()` return 0 instead of a very large number when
    no echo is received?
 
 ---

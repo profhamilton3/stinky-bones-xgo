@@ -194,7 +194,7 @@ def avoid_wall():
     basic.pause(900)
 
     # Turn right to find an open path
-    xgo.move_xgo(xgo.direction_enum.TURN_RIGHT, 40)
+    xgo.move_xgo(xgo.direction_enum.RIGHT, 40)
     basic.pause(700)
 
     xgo.execution_action(xgo.action_enum.STAND)
@@ -285,10 +285,10 @@ def on_radio_number(cmd: number):
         xgo.move_xgo(xgo.direction_enum.FORWARD, 50)
         basic.pause(1000)
     elif cmd == 6:
-        xgo.move_xgo(xgo.direction_enum.TURN_LEFT, 50)
+        xgo.move_xgo(xgo.direction_enum.LEFT, 50)
         basic.pause(700)
     elif cmd == 7:
-        xgo.move_xgo(xgo.direction_enum.TURN_RIGHT, 50)
+        xgo.move_xgo(xgo.direction_enum.RIGHT, 50)
         basic.pause(700)
     elif cmd == 8:
         xgo.move_xgo(xgo.direction_enum.BACKWARD, 50)
@@ -309,7 +309,7 @@ def on_forever():
     mag_y = input.magnetic_force(Dimension.Y)
     mag_z = input.magnetic_force(Dimension.Z)
     mag_strength = input.magnetic_force(Dimension.STRENGTH)
-    sonar_cm = sonar.ping(DigitalPin.P0, PingUnit.CENTIMETERS)
+    sonar_cm = sonarbit.sonarbit_distance(Distance_Unit.Distance_Unit_cm, DigitalPin.P0)
 
     # ── 2. Wall detection (highest priority) ────────────────
     # sonar returns 0 when no echo is received (out of range)

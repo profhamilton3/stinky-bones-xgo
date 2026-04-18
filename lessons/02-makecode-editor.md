@@ -116,7 +116,7 @@ automatically when you import from GitHub. To add a new extension manually:
 3. Click the matching result to install it
 
 Extensions add new API functions (like `xgo.execution_action()` and
-`sonar.ping()`) to your project.
+`sonarbit.sonarbit_distance()`) to your project.
 
 ---
 
