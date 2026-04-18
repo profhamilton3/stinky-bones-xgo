@@ -35,7 +35,8 @@
 # AVOIDING    = 3   Obstacle detected — backing up and turning
 #
 # ── DATA BROADCAST (to stinky-bones-datacollector) ─────────
-# Every LOG_INTERVAL_MS the dog broadcasts a 16-byte buffer:
+# Every LOG_INTERVAL_MS (500 ms) the dog broadcasts a 16-byte
+# buffer, and immediately on every bone detection:
 #   bytes  0-1  : mag_x   (INT16_LE, µT)
 #   bytes  2-3  : mag_y   (INT16_LE, µT)
 #   bytes  4-5  : mag_z   (INT16_LE, µT)
@@ -71,8 +72,9 @@ CLAP_WINDOW_MS = 1500
 # quieter sounds). 80 works well for a hand-clap at 1 metre.
 SOUND_THRESH = 80
 
-# How often the dog broadcasts sensor data over radio.
-LOG_INTERVAL_MS = 3000
+# How often the background interval broadcasts sensor data.
+# Also fires immediately on every bone detection.
+LOG_INTERVAL_MS = 500
 
 # Number of forward-crawl steps before a full sniff-pause.
 # Higher = more ground covered per sniff cycle.
@@ -88,7 +90,6 @@ clap_count = 0         # counts rapid loud sounds
 clap_time = 0          # timestamp of the first clap in a window
 search_step = 0        # position within the crawl-sniff cycle
 bone_count = 0         # total bones found this session
-last_log_time = 0      # timestamp of the last radio broadcast
 
 # Cached sensor readings (refreshed in the forever loop)
 mag_x = 0
@@ -117,6 +118,32 @@ basic.show_icon(IconNames.ASLEEP)
 # ────────────────────────────────────────────────────────────
 # HELPER FUNCTIONS
 # ────────────────────────────────────────────────────────────
+
+def log_data():
+    """Broadcast a 16-byte sensor snapshot over radio.
+
+    Called by the background interval every LOG_INTERVAL_MS,
+    and immediately when a bone is detected so spikes are
+    never missed between interval ticks.
+    """
+    global mag_x, mag_y, mag_z, mag_strength, sonar_cm
+    buf = bytearray(16)
+    buf.set_number(NumberFormat.INT16_LE, 0, mag_x)
+    buf.set_number(NumberFormat.INT16_LE, 2, mag_y)
+    buf.set_number(NumberFormat.INT16_LE, 4, mag_z)
+    buf.set_number(NumberFormat.INT16_LE, 6,
+                       input.acceleration(Dimension.X))
+    buf.set_number(NumberFormat.INT16_LE, 8,
+                       input.acceleration(Dimension.Y))
+    buf.set_number(NumberFormat.INT16_LE, 10,
+                       input.acceleration(Dimension.Z))
+    buf.set_number(NumberFormat.INT16_LE, 12, sonar_cm)
+    buf.set_number(NumberFormat.INT16_LE, 14, state)
+    radio.send_buffer(buf)
+
+
+loops.every_interval(LOG_INTERVAL_MS, log_data)
+
 
 def start_searching():
     """Transition to SEARCHING state: stand up and begin hunt."""
@@ -161,8 +188,6 @@ def celebrate_bone():
     basic.pause(800)
     xgo.execution_action(xgo.action_enum.STAND)
     basic.pause(400)
-
-
 
     # Resume previous activity
     if searching:
@@ -239,7 +264,6 @@ def on_button_b():
     basic.show_number(bone_count)
     basic.pause(1200)
     basic.clear_screen()
-    
 input.on_button_pressed(Button.B, on_button_b)
 
 
@@ -291,37 +315,13 @@ def on_radio_number(cmd: number):
         basic.pause(1000)
 radio.on_received_number(on_radio_number)
 
-def log_data():
-        global mag_x, mag_y, mag_z, mag_strength
-        global sonar_cm, last_log_time
-        # ── 5. Periodic sensor data broadcast ───────────────────
-        now = input.running_time()
-        if now - last_log_time > LOG_INTERVAL_MS:
-            last_log_time = now
-            buf = bytearray(16)
-            buf.set_number(NumberFormat.INT16_LE, 0, mag_x)
-            buf.set_number(NumberFormat.INT16_LE, 2, mag_y)
-            buf.set_number(NumberFormat.INT16_LE, 4, mag_z)
-            buf.set_number(NumberFormat.INT16_LE, 6,
-                               input.acceleration(Dimension.X))
-            buf.set_number(NumberFormat.INT16_LE, 8,
-                               input.acceleration(Dimension.Y))
-            buf.set_number(NumberFormat.INT16_LE, 10,
-                               input.acceleration(Dimension.Z))
-            buf.set_number(NumberFormat.INT16_LE, 12, sonar_cm)
-            buf.set_number(NumberFormat.INT16_LE, 14, state)
-            radio.send_buffer(buf)
-
-
-loops.every_interval(500, log_data)
 
 # ────────────────────────────────────────────────────────────
 # MAIN FOREVER LOOP
 # ────────────────────────────────────────────────────────────
 
 def on_forever():
-    global mag_x, mag_y, mag_z, mag_strength
-    global sonar_cm, last_log_time
+    global mag_x, mag_y, mag_z, mag_strength, sonar_cm
 
     # ── 1. Read all sensors ─────────────────────────────────
     mag_x = input.magnetic_force(Dimension.X)
