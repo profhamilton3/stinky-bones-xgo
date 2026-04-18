@@ -1,0 +1,27 @@
+{
+    "name": "stinky-bones-xgo",
+    "description": "Stinky Bones XGO Dog — micro:bit v2 magnetic bone hunter using XGO Gen 1 robot dog, RingBit connector, HC-SR04 sonar, and radio telemetry. Educational Python project for THE Hamilton Essentials Foundation.",
+    "dependencies": {
+        "core": "*",
+        "radio": "*",
+        "microphone": "*",
+        "datalogger": "*",
+        "XGO": "github:elecfreaks/pxt-xgo#v1.3.9",
+        "sonarbit": "github:elecfreaks/pxt-sonarbit#V1.0.9"
+    },
+    "files": [
+        "main.py",
+        "README.md"
+    ],
+    "testFiles": [
+        "test.ts"
+    ],
+    "targetVersions": {
+        "target": "7.0.51",
+        "targetId": "microbit"
+    },
+    "supportedTargets": [
+        "microbit"
+    ],
+    "preferredEditor": "pyprj"
+}
