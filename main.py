@@ -162,10 +162,7 @@ def celebrate_bone():
     xgo.execution_action(xgo.action_enum.STAND)
     basic.pause(400)
 
-    # Display total bone count on LED matrix
-    basic.show_number(bone_count)
-    basic.pause(1200)
-    basic.clear_screen()
+
 
     # Resume previous activity
     if searching:

@@ -149,10 +149,6 @@ function celebrate_bone() {
     basic.pause(800)
     xgo.execution_action(xgo.action_enum.Stand)
     basic.pause(400)
-    //  Display total bone count on LED matrix
-    basic.showNumber(bone_count)
-    basic.pause(1200)
-    basic.clearScreen()
     //  Resume previous activity
     if (searching) {
         state = 1
