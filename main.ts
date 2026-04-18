@@ -35,7 +35,8 @@
 //  AVOIDING    = 3   Obstacle detected — backing up and turning
 // 
 //  ── DATA BROADCAST (to stinky-bones-datacollector) ─────────
-//  Every LOG_INTERVAL_MS the dog broadcasts a 16-byte buffer:
+//  Every LOG_INTERVAL_MS (500 ms) the dog broadcasts a 16-byte
+//  buffer, and immediately on every bone detection:
 //    bytes  0-1  : mag_x   (INT16_LE, µT)
 //    bytes  2-3  : mag_y   (INT16_LE, µT)
 //    bytes  4-5  : mag_z   (INT16_LE, µT)
@@ -67,8 +68,9 @@ let CLAP_WINDOW_MS = 1500
 //  Microphone sensitivity. Lower = more sensitive (triggers on
 //  quieter sounds). 80 works well for a hand-clap at 1 metre.
 let SOUND_THRESH = 80
-//  How often the dog broadcasts sensor data over radio.
-let LOG_INTERVAL_MS = 3000
+//  How often the background interval broadcasts sensor data.
+//  Also fires immediately on every bone detection.
+let LOG_INTERVAL_MS = 500
 //  Number of forward-crawl steps before a full sniff-pause.
 //  Higher = more ground covered per sniff cycle.
 let SEARCH_STEPS = 4
@@ -87,8 +89,6 @@ let search_step = 0
 //  position within the crawl-sniff cycle
 let bone_count = 0
 //  total bones found this session
-let last_log_time = 0
-//  timestamp of the last radio broadcast
 //  Cached sensor readings (refreshed in the forever loop)
 let mag_x = 0
 let mag_y = 0
@@ -111,6 +111,28 @@ basic.showIcon(IconNames.Asleep)
 //  ────────────────────────────────────────────────────────────
 //  HELPER FUNCTIONS
 //  ────────────────────────────────────────────────────────────
+function log_data() {
+    /** Broadcast a 16-byte sensor snapshot over radio.
+
+    Called by the background interval every LOG_INTERVAL_MS,
+    and immediately when a bone is detected so spikes are
+    never missed between interval ticks.
+    
+ */
+    
+    let buf = control.createBuffer(16)
+    buf.setNumber(NumberFormat.Int16LE, 0, mag_x)
+    buf.setNumber(NumberFormat.Int16LE, 2, mag_y)
+    buf.setNumber(NumberFormat.Int16LE, 4, mag_z)
+    buf.setNumber(NumberFormat.Int16LE, 6, input.acceleration(Dimension.X))
+    buf.setNumber(NumberFormat.Int16LE, 8, input.acceleration(Dimension.Y))
+    buf.setNumber(NumberFormat.Int16LE, 10, input.acceleration(Dimension.Z))
+    buf.setNumber(NumberFormat.Int16LE, 12, sonar_cm)
+    buf.setNumber(NumberFormat.Int16LE, 14, state)
+    radio.sendBuffer(buf)
+}
+
+loops.everyInterval(LOG_INTERVAL_MS, log_data)
 function start_searching() {
     /** Transition to SEARCHING state: stand up and begin hunt. */
     
@@ -276,34 +298,10 @@ radio.onReceivedNumber(function on_radio_number(cmd: number) {
     }
     
 })
-function log_data() {
-    let buf: Buffer;
-    
-    
-    //  ── 5. Periodic sensor data broadcast ───────────────────
-    let now = input.runningTime()
-    if (now - last_log_time > LOG_INTERVAL_MS) {
-        last_log_time = now
-        buf = control.createBuffer(16)
-        buf.setNumber(NumberFormat.Int16LE, 0, mag_x)
-        buf.setNumber(NumberFormat.Int16LE, 2, mag_y)
-        buf.setNumber(NumberFormat.Int16LE, 4, mag_z)
-        buf.setNumber(NumberFormat.Int16LE, 6, input.acceleration(Dimension.X))
-        buf.setNumber(NumberFormat.Int16LE, 8, input.acceleration(Dimension.Y))
-        buf.setNumber(NumberFormat.Int16LE, 10, input.acceleration(Dimension.Z))
-        buf.setNumber(NumberFormat.Int16LE, 12, sonar_cm)
-        buf.setNumber(NumberFormat.Int16LE, 14, state)
-        radio.sendBuffer(buf)
-    }
-    
-}
-
-loops.everyInterval(500, log_data)
 //  ────────────────────────────────────────────────────────────
 //  MAIN FOREVER LOOP
 //  ────────────────────────────────────────────────────────────
 basic.forever(function on_forever() {
-    
     
     //  ── 1. Read all sensors ─────────────────────────────────
     mag_x = input.magneticForce(Dimension.X)
