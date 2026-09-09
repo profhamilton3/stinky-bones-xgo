@@ -16,7 +16,7 @@
 | Platform | [makecode.microbit.org](https://makecode.microbit.org) |
 | Hardware | micro:bit v2, XGO Gen 1 robot dog, RingBit board, HC-SR04 sonar |
 | Prerequisites | None — designed for absolute beginners |
-| Audience | Youth and young adults (ages 12–22) |
+| Audience | Youth and young adults (ages 10–25) |
 
 ---
 
