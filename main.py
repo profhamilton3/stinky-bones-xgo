@@ -27,6 +27,9 @@
 #   6 = turn left            (joystick push left)
 #   7 = turn right           (joystick push right)
 #   8 = move backward        (joystick push down)
+# Commands 3 and 5-8 only work while the dog is idle. A move
+# keeps going while packets keep arriving and stops by itself
+# MANUAL_MOVE_MS / MANUAL_TURN_MS after the last one.
 #
 # ── STATE MACHINE ──────────────────────────────────────────
 # IDLE        = 0   Sitting, waiting for a command
@@ -76,9 +79,26 @@ SOUND_THRESH = 80
 # Also fires immediately on every bone detection.
 LOG_INTERVAL_MS = 500
 
-# Number of forward-crawl steps before a full sniff-pause.
+# Number of short forward steps before a full sniff-pause.
 # Higher = more ground covered per sniff cycle.
-SEARCH_STEPS = 4
+SEARCH_STEPS = 10
+
+# Each search step walks for STEP_MS and then stops, so the
+# sonar and magnetometer are checked again after every step.
+SEARCH_SPEED = 40      # walking speed, 0-100
+STEP_MS = 400
+
+# Wall avoidance: back up, then rotate on the spot.
+# Raise AVOID_TURN_MS if the dog does not turn far enough.
+AVOID_SPEED = 40       # 0-100
+AVOID_BACK_MS = 900
+AVOID_TURN_MS = 1200
+
+# Radio joystick moves (commands 5-8). A move stops by itself
+# this long after the last packet for it arrives.
+MANUAL_SPEED = 50      # 0-100
+MANUAL_MOVE_MS = 1000  # forward / backward
+MANUAL_TURN_MS = 700   # turn left / right
 
 
 # ────────────────────────────────────────────────────────────
@@ -90,6 +110,16 @@ clap_count = 0         # counts rapid loud sounds
 clap_time = 0          # timestamp of the first clap in a window
 search_step = 0        # position within the crawl-sniff cycle
 bone_count = 0         # total bones found this session
+
+# Every Start and Stop adds 1 to run_id. A routine remembers
+# the run_id it started with and gives up (without moving the
+# dog again) as soon as run_id changes.
+run_id = 0
+stand_pending = False  # forever loop should stand up next
+dance_pending = False  # forever loop should do a victory dance
+sit_run = -1           # run_id that the pending sit belongs to
+manual_cmd = 0         # radio move command in progress (5-8)
+manual_until = 0       # running_time when that move stops (0 = none)
 
 # Cached sensor readings (refreshed in the forever loop)
 mag_x = 0
@@ -145,31 +175,93 @@ def log_data():
 loops.every_interval(LOG_INTERVAL_MS, log_data)
 
 
+def stop_motion():
+    """Set every XGO walking speed back to zero.
+
+    move_xgo and rotate only set a speed; the dog keeps
+    walking until that speed is set to 0 again. Forward/back,
+    sideways and turning are three separate speeds, so each
+    one has to be stopped on its own.
+    """
+    global manual_until
+    manual_until = 0
+    xgo.move_xgo(xgo.direction_enum.FORWARD, 0)   # forward / back
+    xgo.move_xgo(xgo.direction_enum.LEFT, 0)      # sideways
+    xgo.rotate(xgo.rotate_enum.LEFT, 0)           # turning
+
+
+def is_current(token: number):
+    """True if no Start or Stop has happened since token."""
+    return token == run_id
+
+
+def bone_here():
+    """Read the magnetometer; True if a bone is underneath."""
+    global mag_strength
+    mag_strength = input.magnetic_force(Dimension.STRENGTH)
+    return mag_strength > BONE_THRESHOLD
+
+
 def start_searching():
-    """Transition to SEARCHING state: stand up and begin hunt."""
-    global state, searching, search_step
+    """Transition to SEARCHING state: stand up and begin hunt.
+
+    Returns straight away. The forever loop does the standing
+    up, so a Stop can still cancel it.
+    """
+    global run_id, state, searching, search_step
+    global stand_pending, dance_pending
+    run_id += 1
     state = 1
     searching = True
     search_step = 0
+    stand_pending = True
+    dance_pending = False
+    stop_motion()
     basic.show_icon(IconNames.HAPPY)
-    xgo.execution_action(xgo.action_enum.STAND)
-    basic.pause(500)
+
+
+def sit_after_stop():
+    """Background part of Stop: sit, unless Start came first."""
+    global sit_run
+    if sit_run == run_id:
+        sit_run = -1
+        xgo.execution_action(xgo.action_enum.SIT_DOWN)
 
 
 def stop_searching():
-    """Transition to IDLE state: sit and wait."""
-    global state, searching
+    """Transition to IDLE state: stop moving, then sit.
+
+    Stop wins over everything else. It cancels whatever the
+    dog is doing, and the sit runs in the background so this
+    returns straight away.
+    """
+    global run_id, state, searching, stand_pending, dance_pending
+    global sit_run
+    run_id += 1
+    my_run = run_id
     state = 0
     searching = False
-    xgo.execution_action(xgo.action_enum.SIT_DOWN)
-    basic.show_icon(IconNames.ASLEEP)
+    stand_pending = False
+    dance_pending = False
+    sit_run = run_id
+    stop_motion()
+    control.in_background(sit_after_stop)
+    if is_current(my_run):
+        basic.show_icon(IconNames.ASLEEP)
 
 
-def celebrate_bone():
-    """Play victory sequence when a Stinky Bone is detected."""
+def celebrate_bone(token: number):
+    """Play victory sequence when a Stinky Bone is detected.
+
+    Gives up quietly, without moving the dog again, if Start
+    or Stop is pressed part-way through.
+    """
     global state, bone_count
+    if not is_current(token):
+        return
     state = 2
     bone_count += 1
+    stop_motion()
     log_data()
     # Victory sound (plays in background while dog moves)
     music.play(
@@ -178,16 +270,24 @@ def celebrate_bone():
     )
     basic.show_icon(IconNames.YES)
     basic.pause(300)
+    if not is_current(token):
+        return
 
     # Sit first to signal "found something"
     xgo.execution_action(xgo.action_enum.SIT_DOWN)
     basic.pause(600)
+    if not is_current(token):
+        return
 
     # Victory dance sequence
     xgo.execution_action(xgo.action_enum.STRETCH_ONESELF)
     basic.pause(800)
+    if not is_current(token):
+        return
     xgo.execution_action(xgo.action_enum.STAND)
     basic.pause(400)
+    if not is_current(token):
+        return
 
     # Resume previous activity
     if searching:
@@ -198,53 +298,112 @@ def celebrate_bone():
         basic.show_icon(IconNames.ASLEEP)
 
 
-def avoid_wall():
-    """Back up and turn when the sonar detects an obstacle."""
+def avoid_wall(token: number):
+    """Back up and rotate when the sonar detects an obstacle."""
     global state
-    prior_state = state
+    if not is_current(token):
+        return
     state = 3
     basic.show_icon(IconNames.NO)
+    if not is_current(token):
+        return
 
     # Back up
-    xgo.move_xgo(xgo.direction_enum.BACKWARD, 40)
-    basic.pause(900)
+    xgo.move_xgo(xgo.direction_enum.BACKWARD, AVOID_SPEED)
+    basic.pause(AVOID_BACK_MS)
+    if not is_current(token):
+        return
+    xgo.move_xgo(xgo.direction_enum.FORWARD, 0)
 
-    # Turn right to find an open path
-    xgo.move_xgo(xgo.direction_enum.RIGHT, 40)
-    basic.pause(700)
+    # Rotate right on the spot to find an open path
+    xgo.rotate(xgo.rotate_enum.RIGHT, AVOID_SPEED)
+    basic.pause(AVOID_TURN_MS)
+    if not is_current(token):
+        return
+    xgo.rotate(xgo.rotate_enum.RIGHT, 0)
 
-    xgo.execution_action(xgo.action_enum.STAND)
-    basic.clear_screen()
-
-    # Restore prior state
-    state = prior_state
-    if searching:
-        basic.show_icon(IconNames.HAPPY)
+    # Back to searching
+    state = 1
+    basic.show_icon(IconNames.HAPPY)
 
 
-def do_search_step():
-    """One step of the crawl-then-sniff search pattern.
+def do_search_step(token: number):
+    """One step of the walk-then-sniff search pattern.
 
-    The dog crawls forward SEARCH_STEPS times, then on the
-    next call it crouches (SQUAT) and lowers its head
-    (LOOKING_FOR_FOOD) to bring the magnetometer closer to
-    the ground where bones might be hiding.
+    The dog takes SEARCH_STEPS short steps (each one stopped
+    after STEP_MS), then on the next call it crouches (SQUAT)
+    and lowers its head (LOOKING_FOR_FOOD) to bring the
+    magnetometer closer to the ground where bones might be
+    hiding, checking for a bone while it is down there.
     """
     global search_step
     if search_step < SEARCH_STEPS:
-        # Crawl forward one step
-        xgo.execution_action(xgo.action_enum.CRAWL_FORWARD)
-        basic.pause(900)
+        # Walk forward one short step, then stop
         search_step += 1
+        xgo.move_xgo(xgo.direction_enum.FORWARD, SEARCH_SPEED)
+        basic.pause(STEP_MS)
+        if is_current(token):
+            xgo.move_xgo(xgo.direction_enum.FORWARD, 0)
     else:
         # Sniff cycle: lower body, sweep head, rise again
         search_step = 0
         xgo.execution_action(xgo.action_enum.SQUAT)
         basic.pause(700)
+        if not is_current(token):
+            return
+        if bone_here():
+            celebrate_bone(token)
+            return
         xgo.execution_action(xgo.action_enum.LOOKING_FOR_FOOD)
         basic.pause(1000)
+        if not is_current(token):
+            return
+        if bone_here():
+            celebrate_bone(token)
+            return
         xgo.execution_action(xgo.action_enum.STAND)
         basic.pause(400)
+
+
+def manual_move(cmd: number):
+    """Radio joystick move (commands 5-8), only while idle.
+
+    Sets the speed and returns straight away, so a Stop from
+    the controller is never stuck behind queued moves.
+    check_manual_move() stops the dog once packets stop.
+    """
+    global manual_cmd, manual_until
+    if searching or state != 0:
+        return  # a search or dance is in charge of the legs
+    token = run_id
+    if manual_until == 0 or cmd != manual_cmd:
+        stop_motion()  # new direction: clear the old speeds
+    manual_cmd = cmd
+    duration = MANUAL_MOVE_MS
+    if cmd == 5:
+        xgo.move_xgo(xgo.direction_enum.FORWARD, MANUAL_SPEED)
+    elif cmd == 6:
+        xgo.rotate(xgo.rotate_enum.LEFT, MANUAL_SPEED)
+        duration = MANUAL_TURN_MS
+    elif cmd == 7:
+        xgo.rotate(xgo.rotate_enum.RIGHT, MANUAL_SPEED)
+        duration = MANUAL_TURN_MS
+    else:
+        xgo.move_xgo(xgo.direction_enum.BACKWARD, MANUAL_SPEED)
+    if is_current(token) and state == 0 and not searching:
+        manual_until = input.running_time() + duration
+    else:
+        # Start, Stop or a dance happened while sending: undo it
+        stop_motion()
+
+
+def check_manual_move():
+    """Stop a radio move once its time is up."""
+    if manual_until > 0 and input.running_time() >= manual_until:
+        stop_motion()
+
+
+loops.every_interval(50, check_manual_move)
 
 
 # ────────────────────────────────────────────────────────────
@@ -263,7 +422,10 @@ def on_button_b():
     # Display total bone count on LED matrix
     basic.show_number(bone_count)
     basic.pause(1200)
-    basic.clear_screen()
+    if searching:
+        basic.show_icon(IconNames.HAPPY)
+    else:
+        basic.clear_screen()
 input.on_button_pressed(Button.B, on_button_b)
 
 
@@ -290,38 +452,34 @@ def on_loud_sound():
 input.on_sound(DetectedSound.LOUD, on_loud_sound)
 
 
-# Radio commands from the controller microbit
+# Radio commands from the controller microbit.
+# Nothing here waits for the dog to finish moving, so every
+# command (especially Stop) is handled as soon as it arrives.
 def on_radio_number(cmd: number):
+    global stand_pending, dance_pending
     if cmd == 1:
         start_searching()
     elif cmd == 2:
         stop_searching()
     elif cmd == 3:
-        xgo.execution_action(xgo.action_enum.STAND)
+        if not searching:
+            stand_pending = True
     elif cmd == 4:
         # Force a victory dance (useful for testing lesson demos)
-        celebrate_bone()
-    elif cmd == 5:
-        xgo.move_xgo(xgo.direction_enum.FORWARD, 50)
-        basic.pause(1000)
-    elif cmd == 6:
-        xgo.move_xgo(xgo.direction_enum.LEFT, 50)
-        basic.pause(700)
-    elif cmd == 7:
-        xgo.move_xgo(xgo.direction_enum.RIGHT, 50)
-        basic.pause(700)
-    elif cmd == 8:
-        xgo.move_xgo(xgo.direction_enum.BACKWARD, 50)
-        basic.pause(1000)
+        dance_pending = True
+    elif cmd >= 5 and cmd <= 8:
+        manual_move(cmd)
 radio.on_received_number(on_radio_number)
 
 
 # ────────────────────────────────────────────────────────────
 # MAIN FOREVER LOOP
+# All autonomous moves happen here, one routine at a time.
 # ────────────────────────────────────────────────────────────
 
 def on_forever():
     global mag_x, mag_y, mag_z, mag_strength, sonar_cm
+    global stand_pending, dance_pending
 
     # ── 1. Read all sensors ─────────────────────────────────
     mag_x = input.magnetic_force(Dimension.X)
@@ -329,21 +487,30 @@ def on_forever():
     mag_z = input.magnetic_force(Dimension.Z)
     mag_strength = input.magnetic_force(Dimension.STRENGTH)
     sonar_cm = sonarbit.sonarbit_distance(Distance_Unit.Distance_Unit_cm, DigitalPin.P0)
+    token = run_id
 
-    # ── 2. Wall detection (highest priority) ────────────────
+    # ── 2. Requests from the radio controller ───────────────
+    if dance_pending:
+        dance_pending = False
+        celebrate_bone(token)
+    elif stand_pending:
+        stand_pending = False
+        xgo.execution_action(xgo.action_enum.STAND)
+
+    # ── 3. Wall detection (first check while searching) ────
     # sonar returns 0 when no echo is received (out of range)
     # so we only act on readings > 0
-    if state == 1 and 0 < sonar_cm < WALL_CM:
-        avoid_wall()
+    elif state == 1 and 0 < sonar_cm < WALL_CM:
+        avoid_wall(token)
 
-    # ── 3. Bone detection ───────────────────────────────────
+    # ── 4. Bone detection ───────────────────────────────────
     elif state == 1 and mag_strength > BONE_THRESHOLD:
-        celebrate_bone()
+        celebrate_bone(token)
 
-    # ── 4. Normal search behaviour ──────────────────────────
+    # ── 5. Normal search behaviour ──────────────────────────
     elif state == 1:
-        do_search_step()
+        do_search_step(token)
 
-    basic.pause(100)
+    basic.pause(20)
 
 basic.forever(on_forever)
