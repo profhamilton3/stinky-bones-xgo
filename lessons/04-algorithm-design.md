@@ -50,18 +50,19 @@ an algorithm before writing real syntax.
 FOREVER:
     read magnetometer
     read sonar
+    token = run_id      (so Start / Stop can cancel what comes next)
 
     IF we are searching AND sonar < WALL_CM:
-        avoid_wall()
+        avoid_wall(token)
 
     ELSE IF we are searching AND mag_strength > BONE_THRESHOLD:
-        celebrate_bone()
+        celebrate_bone(token)
 
     ELSE IF we are searching:
-        do_search_step()
+        do_search_step(token)
 
-    EVERY 3 seconds:
-        broadcast sensor data over radio
+EVERY 0.5 seconds (in the background):
+    broadcast sensor data over radio
 ```
 
 Notice: wall detection comes before bone detection. Why?
@@ -77,9 +78,9 @@ Notice: wall detection comes before bone detection. Why?
 ```
 search_step = 0
 
-FUNCTION do_search_step():
+FUNCTION do_search_step(token):
     IF search_step < SEARCH_STEPS:
-        crawl forward one step
+        walk forward for STEP_MS, then stop
         search_step = search_step + 1
     ELSE:
         search_step = 0
@@ -88,7 +89,8 @@ FUNCTION do_search_step():
         stand back up
 ```
 
-The dog crawls forward N steps, then stops and crouches to sweep its
+The dog takes N short steps forward (stopping after each one so the
+sensors get checked again), then crouches to sweep its
 magnetometer close to the ground. Bones are hidden ON the ground, so the
 dog must get low to sense them reliably.
 
@@ -147,11 +149,11 @@ while True:
         dance()
     if sonar < 15:
         back_up()
-    crawl_forward()   # what if we're dancing? what if we're backing up?
+    walk_forward()    # what if we're dancing? what if we're backing up?
 ```
 
 States prevent actions from conflicting. When state == 2 (CELEBRATING),
-the main loop does not send crawl commands to the XGO.
+the main loop does not send walk commands to the XGO.
 
 ---
 
@@ -174,22 +176,19 @@ sonar > 0                                              │
 AND sonar < WALL_CM?                                   │
     │ YES                                              │
     ▼                                                  │
-avoid_wall() ────────────────────────────┐            │
+avoid_wall(token) ───────────────────────┐            │
                                          │            │
                                          ▼            │
                               mag_strength > BONE_THRESHOLD?
                                          │ YES
                                          ▼
-                                  celebrate_bone()
+                               celebrate_bone(token)
                                          │
                                          ▼
-                                   do_search_step()
+                                do_search_step(token)
                                          │
                                          ▼
-                              [Broadcast data if timer up]
-                                         │
-                                         ▼
-                                   [Pause 100ms]
+                                   [Pause 20ms]
                                          │
                                         (loop)
 ```

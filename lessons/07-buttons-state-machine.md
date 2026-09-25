@@ -74,20 +74,37 @@ Button B → call `stop_searching()` → state changes to 0 (IDLE)
 
 ```python
 def start_searching():
-    global state, searching, search_step
+    global run_id, state, searching, search_step
+    global stand_pending, dance_pending
+    run_id += 1
     state = 1
     searching = True
     search_step = 0
+    stand_pending = True
+    dance_pending = False
+    stop_motion()
     basic.show_icon(IconNames.HAPPY)
-    xgo.execution_action(xgo.action_enum.STAND)
-    basic.pause(500)
+
+def sit_after_stop():
+    global sit_run
+    if sit_run == run_id:
+        sit_run = -1
+        xgo.execution_action(xgo.action_enum.SIT_DOWN)
 
 def stop_searching():
-    global state, searching
+    global run_id, state, searching, stand_pending, dance_pending
+    global sit_run
+    run_id += 1
+    my_run = run_id
     state = 0
     searching = False
-    xgo.execution_action(xgo.action_enum.SIT_DOWN)
-    basic.show_icon(IconNames.ASLEEP)
+    stand_pending = False
+    dance_pending = False
+    sit_run = run_id
+    stop_motion()
+    control.in_background(sit_after_stop)
+    if is_current(my_run):
+        basic.show_icon(IconNames.ASLEEP)
 
 def on_button_a():
     start_searching()
@@ -97,6 +114,40 @@ def on_button_b():
     stop_searching()
 input.on_button_pressed(Button.B, on_button_b)
 ```
+
+(In `main.py`, `on_button_b` also flashes the number of bones found.)
+
+### Start and Stop return straight away
+
+Neither function waits for the dog to finish moving:
+
+- `start_searching()` does not stand the dog up itself. It sets
+  `stand_pending = True`, and the forever loop does the standing on its
+  next pass.
+- `stop_searching()` calls `stop_motion()` (which sets every walking speed
+  to 0 — see Lesson 8) and then asks `control.in_background()` to run
+  `sit_after_stop` *alongside* the rest of the program. The sit happens
+  only if nobody pressed Start in the meantime (`sit_run == run_id`).
+
+Why bother? A button handler that pauses blocks other events. If Stop
+had to wait for a sit to finish, a second press — or a radio Stop — would
+be stuck waiting too. Quick handlers keep the dog responsive.
+
+### `run_id` — cancelling what the dog is doing
+
+Both functions start with `run_id += 1`. Think of `run_id` as a ticket
+number. Every routine that moves the dog (searching, dancing, avoiding a
+wall) is given the ticket number that was current when it began — its
+`token`. After each pause, it checks:
+
+```python
+def is_current(token: number):
+    return token == run_id
+```
+
+If Start or Stop has been pressed since, the numbers no longer match and
+the routine gives up without moving the dog again. That is how Stop
+"wins" over everything else, even a dance that is half-way through.
 
 ---
 
@@ -110,22 +161,27 @@ Initial:  state=0, searching=False, dog sits, LED=😴
 User presses A:
   on_button_a() fires
   → start_searching() called
-    global state=1, searching=True, search_step=0
+    run_id=1, state=1, searching=True, search_step=0
+    stand_pending=True
     show happy face
-    XGO stands up
-  state=1, searching=True, dog standing, LED=😊
+  state=1, searching=True, LED=😊
 
 Forever loop runs:
-  state == 1 → do_search_step() called
-  dog crawls forward, search_step=1
+  stand_pending → XGO stands up, stand_pending=False
+Forever loop runs again (token=1):
+  state == 1 → do_search_step(1) called
+  dog walks one short step and stops, search_step=1
 
 User presses B:
   on_button_b() fires
   → stop_searching() called
-    global state=0, searching=False
-    XGO sits down
+    run_id=2, state=0, searching=False
+    stop_motion() → all speeds 0
+    XGO sits down (in the background)
     show sleeping face
   state=0, searching=False, dog sitting, LED=😴
+
+  Any routine still holding token=1 sees 1 != 2 and gives up.
 
 Forever loop runs:
   state != 1 → search skipped
@@ -147,10 +203,13 @@ After those routines complete, should the dog go back to searching? Only if
 `searching` is still True.
 
 ```python
-def celebrate_bone():
-    global state
+def celebrate_bone(token: number):
+    global state, bone_count
+    if not is_current(token):
+        return
     state = 2
-    # ... dance ...
+    bone_count += 1
+    # ... dance, with an is_current(token) check after each pause ...
     if searching:     # user's intent is preserved even while dancing
         state = 1
         basic.show_icon(IconNames.HAPPY)

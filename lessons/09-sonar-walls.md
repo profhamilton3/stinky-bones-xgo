@@ -8,7 +8,7 @@
 - Explain how ultrasonic sonar measures distance
 - Wire the HC-SR04 to the RingBit P0 connector post
 - Call `sonarbit.sonarbit_distance()` and interpret its return value
-- Implement wall-avoidance behaviour with backup and turn
+- Implement wall-avoidance behaviour with backup and rotate
 - Describe a strategy for mapping arena boundaries without sonar
 
 ---
@@ -83,8 +83,8 @@ distance = sonarbit.sonarbit_distance(Distance_Unit.Distance_Unit_inch, DigitalP
 the timeout period. Always check `sonar_cm > 0` before acting on the reading:
 
 ```python
-if sonar_cm > 0 and sonar_cm < WALL_CM:
-    avoid_wall()
+if state == 1 and 0 < sonar_cm < WALL_CM:
+    avoid_wall(token)
 ```
 
 Without the `> 0` check, an out-of-range reading (0) would trigger
@@ -95,31 +95,78 @@ wall avoidance every time nothing is detected — the opposite of what we want.
 ## Wall Avoidance Behaviour
 
 When the sonar detects an obstacle within `WALL_CM` centimetres, the dog:
-1. Saves its current state (so it knows whether to resume searching)
-2. Backs up for 900ms
-3. Turns right for 700ms
-4. Returns to the saved state
+1. Switches to the AVOIDING state and shows an ✗ on the LEDs
+2. Backs up for `AVOID_BACK_MS` (900ms), then stops backing up
+3. Rotates right on the spot for `AVOID_TURN_MS` (1200ms), then stops turning
+4. Goes back to SEARCHING
 
 ```python
-def avoid_wall():
+def avoid_wall(token: number):
+    """Back up and rotate when the sonar detects an obstacle."""
     global state
-    prior_state = state
-    state = 3               # AVOIDING
+    if not is_current(token):
+        return
+    state = 3                  # AVOIDING
     basic.show_icon(IconNames.NO)
+    if not is_current(token):
+        return
 
-    xgo.move_xgo(xgo.direction_enum.BACKWARD, 40)
-    basic.pause(900)
+    # Back up
+    xgo.move_xgo(xgo.direction_enum.BACKWARD, AVOID_SPEED)
+    basic.pause(AVOID_BACK_MS)
+    if not is_current(token):
+        return
+    xgo.move_xgo(xgo.direction_enum.FORWARD, 0)
 
-    xgo.move_xgo(xgo.direction_enum.RIGHT, 40)
-    basic.pause(700)
+    # Rotate right on the spot to find an open path
+    xgo.rotate(xgo.rotate_enum.RIGHT, AVOID_SPEED)
+    basic.pause(AVOID_TURN_MS)
+    if not is_current(token):
+        return
+    xgo.rotate(xgo.rotate_enum.RIGHT, 0)
 
-    xgo.execution_action(xgo.action_enum.STAND)
-    basic.clear_screen()
-
-    state = prior_state     # restore: either IDLE or SEARCHING
-    if searching:
-        basic.show_icon(IconNames.HAPPY)
+    # Back to searching
+    state = 1
+    basic.show_icon(IconNames.HAPPY)
 ```
+
+### Reading the code line by line
+
+**`token` and `is_current(token)`** — Every press of Start or Stop adds 1
+to a counter called `run_id`. The forever loop hands `avoid_wall` the
+value of `run_id` at the moment it started; that value is the `token`.
+`is_current(token)` simply checks `token == run_id`. If they no longer
+match, someone pressed Start or Stop while the dog was busy, so the
+routine quits with `return` — and, importantly, sends **no more** move
+commands. Imagine a relay race where each runner carries a numbered
+baton: if the coach hands out a new number, anyone holding the old one
+stops running.
+
+**Why check after every `basic.pause()`?** A pause is where the program
+sits and waits, and waiting is exactly when a button press can sneak in.
+Checking right after each pause means Stop takes effect within one step,
+instead of the dog finishing the whole backup-and-turn first.
+
+**`move_xgo(FORWARD, 0)` after backing up** — `move_xgo` only *sets a speed*;
+the dog would keep reversing forever if we never set it back to zero.
+Forward and backward share one speed, so setting FORWARD to 0 also stops
+the backward walk.
+
+**`xgo.rotate(RIGHT, ...)`, not `move_xgo(RIGHT, ...)`** — `move_xgo(RIGHT)`
+would make the dog *strafe* (shuffle sideways, still facing the wall).
+`rotate` actually turns the dog so it faces a new direction. Again we
+finish with speed 0, because turning is its own separate speed.
+
+**`state = 1` at the end** — `avoid_wall` only ever runs while the dog is
+searching (the forever loop checks `state == 1` first). If the user
+pressed Stop part-way through, the routine already quit at one of the
+`is_current` checks, so reaching the last lines means the dog should
+carry on searching. That's why we no longer need to save and restore a
+`prior_state`.
+
+**Tuning** — `AVOID_SPEED`, `AVOID_BACK_MS` and `AVOID_TURN_MS` live at the
+top of `main.py`. If the dog doesn't turn far enough to clear the wall,
+raise `AVOID_TURN_MS`.
 
 **Always turn RIGHT.** If the dog always turns the same direction when
 it hits a wall, it will eventually follow the perimeter of the arena
@@ -146,8 +193,9 @@ def is_stuck():
     return ax > 800 or ay > 800   # tune this threshold
 
 def on_forever():
+    token = run_id
     if state == 1 and is_stuck():
-        avoid_wall()
+        avoid_wall(token)
 ```
 
 This is less reliable than sonar but requires no additional hardware.
@@ -161,8 +209,9 @@ The simplest strategy: turn a random amount after every N steps.
 import random
 # After each sniff cycle, turn a random amount
 angle = random.randint(20, 90)
-xgo.move_xgo(xgo.direction_enum.RIGHT, 50)
+xgo.rotate(xgo.rotate_enum.RIGHT, 50)
 basic.pause(angle * 10)   # rough estimate: 10ms per degree
+xgo.rotate(xgo.rotate_enum.RIGHT, 0)   # stop turning!
 ```
 
 This gives erratic coverage but prevents the dog from getting stuck
@@ -210,8 +259,8 @@ Hold objects at 5, 10, 20, 50 cm. Record the readings. What is the maximum
 reliable range of your sensor?
 
 ### Exercise 2 — Left or Right?
-Modify `avoid_wall()` to randomly choose between turning left and turning
-right. Does the dog cover the arena more evenly? Why or why not?
+Modify `avoid_wall(token)` to randomly choose between
+`xgo.rotate_enum.LEFT` and `xgo.rotate_enum.RIGHT`. Does the dog cover the arena more evenly? Why or why not?
 
 ### Exercise 3 — Obstacle Map
 Using the radio data from the datacollector, write a spreadsheet formula

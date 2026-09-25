@@ -7,7 +7,8 @@
 
 - Explain how the micro:bit communicates with the XGO dog over serial
 - List and describe all available XGO Gen 1 actions
-- Call `xgo.execution_action()` and `xgo.move_xgo()` correctly
+- Call `xgo.execution_action()`, `xgo.move_xgo()` and `xgo.rotate()` correctly
+- Explain why every move must be stopped by setting its speed back to 0
 - Design a custom victory dance sequence
 - Explain why `basic.pause()` is needed between XGO commands
 
@@ -69,24 +70,73 @@ xgo.execution_action(xgo.action_enum.TWIRL_ROLL)
 
 ## Movement Commands
 
-For continuous movement (walking, turning) use `xgo.move_xgo()`:
+For continuous movement (walking, turning) use `xgo.move_xgo()` and
+`xgo.rotate()`:
 
 ```python
 # Parameters: direction, speed (0-100)
 xgo.move_xgo(xgo.direction_enum.FORWARD, 50)    # walk forward at 50%
 xgo.move_xgo(xgo.direction_enum.BACKWARD, 40)   # walk backward at 40%
-xgo.move_xgo(xgo.direction_enum.LEFT, 50)       # turn left at 50%
-xgo.move_xgo(xgo.direction_enum.RIGHT, 50)      # turn right at 50%
+xgo.move_xgo(xgo.direction_enum.LEFT, 50)       # step SIDEWAYS to the left
+xgo.move_xgo(xgo.direction_enum.RIGHT, 50)      # step SIDEWAYS to the right
+
+xgo.rotate(xgo.rotate_enum.LEFT, 50)            # turn on the spot, to the left
+xgo.rotate(xgo.rotate_enum.RIGHT, 50)           # turn on the spot, to the right
 ```
 
-After sending a move command, use `basic.pause(ms)` to let the dog travel
-for that many milliseconds before sending the next command:
+### LEFT and RIGHT: strafe vs turn
+
+Watch out — `move_xgo(LEFT)` does **not** turn the dog! It makes the dog
+**strafe**: it shuffles sideways like a crab while still facing the same
+way. To make the dog change the direction it is *facing*, use
+`xgo.rotate()`.
+
+Inside the pxt-xgo library (v1.3.9) these are two different settings on
+the XGO controller:
+
+| Command | XGO register | What changes |
+|---|---|---|
+| `move_xgo(FORWARD / BACKWARD, speed)` | 0x30 | forward / back speed |
+| `move_xgo(LEFT / RIGHT, speed)` | 0x31 | sideways (strafe) speed |
+| `rotate(LEFT / RIGHT, speed)` | 0x32 | turning speed |
+
+A **register** is a numbered memory slot on the XGO's own computer. Each
+command just writes a new number into one slot.
+
+### Moves never stop on their own
+
+Here is the most important rule of XGO movement: `move_xgo()` and
+`rotate()` only **set a speed**. The dog keeps walking at that speed until
+you set it back to **0** — even if your program has moved on to something
+else. Think of it like pressing a car's accelerator: letting go of the
+steering wheel doesn't put the brakes on.
+
+So every move follows the same three-step pattern — **go, wait, stop**:
 
 ```python
 xgo.move_xgo(xgo.direction_enum.FORWARD, 50)
-basic.pause(2000)    # walk forward for 2 seconds
-xgo.execution_action(xgo.action_enum.STAND)
+basic.pause(2000)                               # walk forward for 2 seconds
+xgo.move_xgo(xgo.direction_enum.FORWARD, 0)     # stop walking forward
+
+xgo.rotate(xgo.rotate_enum.RIGHT, 40)
+basic.pause(1200)                               # turn right for 1.2 seconds
+xgo.rotate(xgo.rotate_enum.RIGHT, 0)            # stop turning
 ```
+
+Because the three speeds live in three separate registers, stopping one
+does **not** stop the others. `main.py` has a helper that zeroes all three
+at once, used whenever the dog must stop no matter what it was doing:
+
+```python
+def stop_motion():
+    global manual_until
+    manual_until = 0
+    xgo.move_xgo(xgo.direction_enum.FORWARD, 0)   # forward / back
+    xgo.move_xgo(xgo.direction_enum.LEFT, 0)      # sideways
+    xgo.rotate(xgo.rotate_enum.LEFT, 0)           # turning
+```
+
+(`manual_until` belongs to the radio joystick moves — see Lesson 10.)
 
 ---
 
@@ -102,33 +152,60 @@ continuing. This gives the XGO time to complete each motion.
 
 Typical timing:
 - Action animations (TWIRL_ROLL, etc.): pause 1000–1500 ms
-- Short movements (CRAWL_FORWARD): pause 800–1000 ms
+- Short walking steps (`move_xgo` then stop): pause 300–1000 ms
 - Stand/sit transitions: pause 400–600 ms
 
 ---
 
-## The Crawl-and-Sniff Search Pattern
+## The Walk-and-Sniff Search Pattern
 
-The search pattern in `main.py` uses actions deliberately:
+The search pattern in `main.py` mixes short walking steps with actions:
 
 ```python
-def do_search_step():
+def do_search_step(token: number):
     global search_step
     if search_step < SEARCH_STEPS:
-        # Crawl one step forward with body low to ground
-        xgo.execution_action(xgo.action_enum.CRAWL_FORWARD)
-        basic.pause(900)
+        # Walk forward one short step, then stop
         search_step += 1
+        xgo.move_xgo(xgo.direction_enum.FORWARD, SEARCH_SPEED)
+        basic.pause(STEP_MS)
+        if is_current(token):
+            xgo.move_xgo(xgo.direction_enum.FORWARD, 0)
     else:
-        # Sniff cycle: lower body, sweep head, rise
+        # Sniff cycle: lower body, sweep head, rise again
         search_step = 0
         xgo.execution_action(xgo.action_enum.SQUAT)       # crouch low
         basic.pause(700)
+        if not is_current(token):
+            return
+        if bone_here():
+            celebrate_bone(token)
+            return
         xgo.execution_action(xgo.action_enum.LOOKING_FOR_FOOD)  # sweep head
         basic.pause(1000)
+        if not is_current(token):
+            return
+        if bone_here():
+            celebrate_bone(token)
+            return
         xgo.execution_action(xgo.action_enum.STAND)        # rise back up
         basic.pause(400)
 ```
+
+Each step walks for only `STEP_MS` (400 ms) and then **stops**. After every
+short step the forever loop runs again, so the sonar and magnetometer are
+checked roughly every half a second — the dog can't march blindly into a
+wall.
+
+**What is `token`?** Every time Start or Stop is pressed, `main.py` adds 1
+to a counter called `run_id`. When a routine begins, it is handed the
+current `run_id` as its `token`. After each `basic.pause()` it asks
+`is_current(token)` — "has anyone pressed Start or Stop since I began?"
+If they have, the routine gives up straight away *without* moving the dog
+again. This is called **cancellation**, and it is how the Stop button can
+interrupt a routine that is half-way through a pause. (Notice the step
+only sends the "stop walking" command if the token is still current — if
+Stop was pressed, `stop_motion()` has already stopped everything.)
 
 **SQUAT** brings the dog's underside (and magnetometer) as close to the
 ground as possible. **LOOKING_FOR_FOOD** sweeps the head — maximising the
@@ -138,17 +215,20 @@ area the magnetometer covers during the sniff.
 
 ## Designing Your Own Victory Dance
 
-The victory dance in `celebrate_bone()` can be customised. Here is the
-current sequence:
+The victory dance in `celebrate_bone(token)` can be customised. Here is the
+current sequence (the `is_current(token)` checks between moves are left
+out to keep it short):
 
 ```python
-xgo.execution_action(xgo.action_enum.SIT_DOWN)       # 600ms
-xgo.execution_action(xgo.action_enum.TWIRL_ROLL)     # 1400ms
-xgo.execution_action(xgo.action_enum.SUR_PLACE)      # 1400ms
-xgo.execution_action(xgo.action_enum.TRIAXIAL_ROTATION) # 1400ms
+xgo.execution_action(xgo.action_enum.SIT_DOWN)         # 600ms
 xgo.execution_action(xgo.action_enum.STRETCH_ONESELF)  # 800ms
-xgo.execution_action(xgo.action_enum.STAND)           # 400ms
+xgo.execution_action(xgo.action_enum.STAND)            # 400ms
 ```
+
+Other actions you could add: `TWIRL_ROLL`, `SUR_PLACE` and
+`TRIAXIAL_ROTATION` (about 1400ms each). Remember to put
+`if not is_current(token): return` after each pause, so Stop can still
+interrupt your dance.
 
 ### Design Exercise
 
@@ -175,14 +255,23 @@ Write a `greet()` function that the dog performs when the program first starts.
 It should last about 5 seconds and use at least 3 different actions.
 
 ### Exercise 3 — Timing Comparison
-Vary the `basic.pause()` after `CRAWL_FORWARD` between 400ms, 800ms, and 1200ms.
+Vary `STEP_MS` (the length of one search step) between 400ms, 800ms, and 1200ms.
 Observe how far the dog travels in each case. Make a table:
 
-| Pause (ms) | Approximate distance traveled |
+| STEP_MS | Approximate distance traveled |
 |---|---|
 | 400 | |
 | 800 | |
 | 1200 | |
+
+Longer steps cover ground faster — but what happens to how often the sonar
+gets checked?
+
+### Exercise 4 — Strafe or Turn?
+Send `xgo.move_xgo(xgo.direction_enum.LEFT, 40)` for 1 second (then stop
+it with speed 0). Then send `xgo.rotate(xgo.rotate_enum.LEFT, 40)` for
+1 second (then stop it). Describe the difference. Which one would help the
+dog get away from a wall it is facing?
 
 ---
 

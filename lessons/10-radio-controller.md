@@ -263,20 +263,88 @@ def on_forever():
 | 7 | Joystick RIGHT | Turn right |
 | 8 | Joystick DOWN | Move backward |
 
-The dog's radio handler (from Lesson 7 and `main.py`):
+The dog's radio handler (from `main.py`):
 
 ```python
 def on_radio_number(cmd: number):
-    if cmd == 1:   start_searching()
-    elif cmd == 2: stop_searching()
-    elif cmd == 3: xgo.execution_action(xgo.action_enum.STAND)
-    elif cmd == 4: celebrate_bone()
-    elif cmd == 5: xgo.move_xgo(xgo.direction_enum.FORWARD, 50); basic.pause(1000)
-    elif cmd == 6: xgo.move_xgo(xgo.direction_enum.LEFT, 50); basic.pause(700)
-    elif cmd == 7: xgo.move_xgo(xgo.direction_enum.RIGHT, 50); basic.pause(700)
-    elif cmd == 8: xgo.move_xgo(xgo.direction_enum.BACKWARD, 50); basic.pause(1000)
+    global stand_pending, dance_pending
+    if cmd == 1:
+        start_searching()
+    elif cmd == 2:
+        stop_searching()
+    elif cmd == 3:
+        if not searching:
+            stand_pending = True
+    elif cmd == 4:
+        # Force a victory dance (useful for testing lesson demos)
+        dance_pending = True
+    elif cmd >= 5 and cmd <= 8:
+        manual_move(cmd)
 radio.on_received_number(on_radio_number)
 ```
+
+### Why the handler never waits
+
+Notice there is no `basic.pause()` anywhere in this handler. That is on
+purpose. The micro:bit handles radio packets **one at a time, in order**.
+If the handler paused for a second on every joystick packet, a Stop
+(command 2) could get stuck in the queue behind several move packets —
+and the dog would keep walking while you frantically press Stop.
+
+So every command finishes almost instantly:
+
+- **Start / Stop** just change some variables and return (see Lesson 7).
+- **Stand (3)** and **Dance (4)** set a "pending" flag. The forever loop
+  sees the flag on its next pass and does the actual moving, where Stop
+  can cancel it.
+- **Moves (5–8)** go to `manual_move`, which sets a speed and a deadline,
+  then returns:
+
+```python
+def manual_move(cmd: number):
+    global manual_cmd, manual_until
+    if searching or state != 0:
+        return  # a search or dance is in charge of the legs
+    token = run_id
+    if manual_until == 0 or cmd != manual_cmd:
+        stop_motion()  # new direction: clear the old speeds
+    manual_cmd = cmd
+    duration = MANUAL_MOVE_MS
+    if cmd == 5:
+        xgo.move_xgo(xgo.direction_enum.FORWARD, MANUAL_SPEED)
+    elif cmd == 6:
+        xgo.rotate(xgo.rotate_enum.LEFT, MANUAL_SPEED)
+        duration = MANUAL_TURN_MS
+    elif cmd == 7:
+        xgo.rotate(xgo.rotate_enum.RIGHT, MANUAL_SPEED)
+        duration = MANUAL_TURN_MS
+    else:
+        xgo.move_xgo(xgo.direction_enum.BACKWARD, MANUAL_SPEED)
+    if is_current(token) and state == 0 and not searching:
+        manual_until = input.running_time() + duration
+    else:
+        # Start, Stop or a dance happened while sending: undo it
+        stop_motion()
+
+
+def check_manual_move():
+    """Stop a radio move once its time is up."""
+    if manual_until > 0 and input.running_time() >= manual_until:
+        stop_motion()
+
+
+loops.every_interval(50, check_manual_move)
+```
+
+Joystick LEFT and RIGHT use `xgo.rotate()` so the dog really **turns**
+(`move_xgo(LEFT/RIGHT)` would only strafe sideways — see Lesson 8).
+
+`manual_until` is a timestamp, just like the clap timer in Lesson 6.
+While you hold the stick, the controller keeps sending packets and each
+one pushes the deadline further into the future. When you let go, the
+packets stop, the deadline passes, and `check_manual_move` (which runs
+every 50ms in the background) calls `stop_motion()` to set every speed
+back to 0.
 
 ---
 
