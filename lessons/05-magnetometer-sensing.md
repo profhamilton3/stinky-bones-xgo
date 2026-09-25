@@ -160,11 +160,21 @@ mag_strength = input.magnetic_force(Dimension.STRENGTH)
 
 # In the bone detection check:
 if state == 1 and mag_strength > BONE_THRESHOLD:
-    celebrate_bone()
+    celebrate_bone(token)
 ```
 
 The dog only checks for bones when `state == 1` (SEARCHING) to avoid
 false triggers while celebrating or avoiding walls.
+
+The sniff cycle also checks while the dog is crouched low, using a small
+helper that re-reads the sensor:
+
+```python
+def bone_here():
+    global mag_strength
+    mag_strength = input.magnetic_force(Dimension.STRENGTH)
+    return mag_strength > BONE_THRESHOLD
+```
 
 ---
 

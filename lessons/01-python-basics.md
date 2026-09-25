@@ -136,7 +136,7 @@ Open `stinky-bones-xgo/main.py` and find these examples:
 | Function definition | `def start_searching():` |
 | `global` declaration | `global state, searching` |
 | Conditional (bone check) | `if state == 1 and mag_strength > BONE_THRESHOLD:` |
-| Function call | `celebrate_bone()` |
+| Function call | `celebrate_bone(token)` |
 
 ---
 
